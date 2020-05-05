@@ -134,11 +134,14 @@ class Constraint implements CompilableConstraintInterface
 
         $this->operator = self::$transOpStr[$operator];
         $this->version = $version;
+        $this->isBranch = 'dev-' === substr($version, 0, 4);
     }
 
     /**
      * @param string $a
+     * @param bool   $aIsBranch
      * @param string $b
+     * @param bool   $bIsBranch
      * @param string $operator
      * @param bool   $compareBranches
      *
@@ -146,7 +149,7 @@ class Constraint implements CompilableConstraintInterface
      *
      * @return bool
      */
-    public function versionCompare($a, $b, $operator, $compareBranches = false)
+    public function versionCompare($a, $aIsBranch, $b,$bIsBranch, $operator, $compareBranches = false)
     {
         if (!isset(self::$transOpStr[$operator])) {
             throw new \InvalidArgumentException(sprintf(
@@ -155,9 +158,6 @@ class Constraint implements CompilableConstraintInterface
                 implode(', ', self::getSupportedOperators())
             ));
         }
-
-        $aIsBranch = 'dev-' === substr($a, 0, 4);
-        $bIsBranch = 'dev-' === substr($b, 0, 4);
 
         if ($operator === '!=' && ($aIsBranch || $bIsBranch)) {
             return $a !== $b;
@@ -176,7 +176,7 @@ class Constraint implements CompilableConstraintInterface
     }
 
     public function compile($otherOperator) {
-        if ($this->version[0] === 'd' && 'dev-' === substr($this->version, 0, 4)) {
+        if ($this->isBranch) {
             if (self::OP_EQ === $this->operator) {
                 if (self::OP_EQ === $otherOperator) {
                     return sprintf('$b && $v === %s', \var_export($this->version, true));
@@ -269,34 +269,36 @@ class Constraint implements CompilableConstraintInterface
         // '!=' operator is match when other operator is not '==' operator or version is not match
         // these kinds of comparisons always have a solution
         if ($isNonEqualOp || $isProviderNonEqualOp) {
-            if ($isNonEqualOp && !$isProviderNonEqualOp && !$isProviderEqualOp && 'dev-' === substr($provider->version, 0, 4)) {
+            if ($isNonEqualOp && !$isProviderNonEqualOp && !$isProviderEqualOp && $provider->isBranch) {
                 return false;
             }
 
-            if ($isProviderNonEqualOp && !$isNonEqualOp && !$isEqualOp && 'dev-' === substr($this->version, 0, 4)) {
+            if ($isProviderNonEqualOp && !$isNonEqualOp && !$isEqualOp && $this->isBranch) {
                 return false;
             }
 
             if (!$isEqualOp && !$isProviderEqualOp) {
                 return true;
             }
-            return $this->versionCompare($provider->version, $this->version, '!=', $compareBranches);
+            return $this->versionCompare($provider->version, $provider->isBranch, $this->version, $this->isBranch, '!=', $compareBranches);
         }
 
         // an example for the condition is <= 2.0 & < 1.0
         // these kinds of comparisons always have a solution
         if ($this->operator !== self::OP_EQ && $noEqualOp === $providerNoEqualOp) {
-            if ('dev-' === substr($this->version, 0, 4) || 'dev-' === substr($provider->version, 0, 4)) {
+            if ($this->isBranch || $provider->isBranch) {
                 return false;
             }
             return true;
         }
 
         $version1 = $isEqualOp ? $this->version : $provider->version;
+        $version1IsBranch = $isEqualOp ? $this->isBranch : $provider->isBranch;
         $version2 = $isEqualOp ? $provider->version : $this->version;
+        $version2IsBranch = $isEqualOp ? $provider->isBranch : $this->isBranch;
         $operator = $isEqualOp ? $provider->operator : $this->operator;
 
-        if ($this->versionCompare($version1, $version2, self::$transOpInt[$operator], $compareBranches)) {
+        if ($this->versionCompare($version1, $version1IsBranch, $version2, $version2IsBranch, self::$transOpInt[$operator], $compareBranches)) {
             // special case, e.g. require >= 1.0 and provide < 1.0
             // 1.0 >= 1.0 but 1.0 is outside of the provided interval
 
@@ -343,7 +345,7 @@ class Constraint implements CompilableConstraintInterface
         }
 
         // Branches
-        if (strpos($this->version, 'dev-') === 0) {
+        if ($this->isBranch) {
             $this->lowerBound = Bound::zero();
             $this->upperBound = Bound::positiveInfinity();
 
